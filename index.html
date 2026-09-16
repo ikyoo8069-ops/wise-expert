@@ -356,7 +356,7 @@ function renderCandidates() {
             </div>` : ''}
 
             ${c.why_together ? `<div class="bg-green-50 border-l-4 border-green-500 p-3 rounded-r-lg mb-3">
-                <p class="text-xs font-bold text-green-700">왜 혼자로는 안 되는가</p>
+                <p class="text-xs font-bold text-green-700">학회가 함께하면 무엇이 더 되는가</p>
                 <p class="text-gray-700 text-sm mt-1">${esc(c.why_together)}</p>
             </div>` : ''}
 
@@ -370,7 +370,7 @@ function renderCandidates() {
 
     document.getElementById('candSection').innerHTML = `
     <h2 class="text-xl font-bold text-white mb-1">🎯 학회와 함께 할 사업 후보</h2>
-    <p class="text-gray-400 text-sm mb-4">혼자 할 수 있는 것은 제외했습니다. 실용성은 이 대체로 함께 풀리는 양입니다.</p>
+    <p class="text-gray-400 text-sm mb-4">학회가 함께함으로써 풀리는 양이 늘어나는 것만 골랐습니다. 실용성은 이 대체로 함께 풀리는 양입니다.</p>
     ${cards}`;
     document.getElementById('candSection').classList.remove('hidden');
     document.getElementById('candSection').scrollIntoView({ behavior:'smooth' });
