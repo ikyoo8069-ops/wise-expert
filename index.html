@@ -49,7 +49,10 @@
             <button onclick="loadSample(1)" class="px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-gray-300 text-xs hover:border-indigo-400">샘플: 기술 분야</button>
             <button onclick="loadSample(2)" class="px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-gray-300 text-xs hover:border-indigo-400">샘플: 회계·세무</button>
             <button onclick="loadSample(3)" class="px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-gray-300 text-xs hover:border-indigo-400">샘플: 법률·부동산</button>
+            <button onclick="document.getElementById('fileInput').click()" id="fileBtn" class="px-3 py-2 bg-indigo-500/30 border border-indigo-400/60 rounded-lg text-indigo-100 text-xs font-bold hover:bg-indigo-500/50 transition" title="PDF, Word(docx), 한글(hwpx), 텍스트 파일의 내용을 직접입력 칸에 추가합니다">＋ 파일 가져오기</button>
+            <input type="file" id="fileInput" class="hidden" multiple accept=".pdf,.docx,.hwpx,.txt,.md,application/pdf,text/plain" onchange="importFiles(this.files)">
         </div>
+        <p id="fileStatus" class="hidden text-xs text-indigo-200 mb-2"></p>
 
         <textarea id="profile" rows="10" class="w-full px-4 py-3 bg-white/20 border border-white/30 rounded-lg text-white text-sm placeholder-gray-400" placeholder="□ 성명&#10;□ 학력&#10;□ 경력&#10;□ 논문·특허·수행과제&#10;□ 상훈"></textarea>
 
@@ -166,6 +169,122 @@ function hideLoading() {
 }
 function loadSample(n) {
     document.getElementById('profile').value = SAMPLES[n] || '';
+}
+
+// ============================================
+// 파일 가져오기 — PDF / DOCX / HWPX / TXT → 직접입력 칸에 추가
+// ============================================
+const LIBS = {
+    pdf:   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+    pdfWorker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
+    mammoth: 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js',
+    jszip: 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'
+};
+const loadedLibs = {};
+function loadLib(key) {
+    if (loadedLibs[key]) return loadedLibs[key];
+    loadedLibs[key] = new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = LIBS[key];
+        s.onload = res;
+        s.onerror = () => rej(new Error('라이브러리를 불러오지 못했습니다: ' + key));
+        document.head.appendChild(s);
+    });
+    return loadedLibs[key];
+}
+function setFileStatus(msg, isErr) {
+    const el = document.getElementById('fileStatus');
+    if (!msg) { el.classList.add('hidden'); return; }
+    el.textContent = msg;
+    el.className = 'text-xs mb-2 ' + (isErr ? 'text-red-300' : 'text-indigo-200');
+}
+function cleanText(t) {
+    return t.replace(/\r/g, '')
+            .replace(/[ \t ]+\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+}
+async function extractPdf(file) {
+    await loadLib('pdf');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = LIBS.pdfWorker;
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const pages = [];
+    for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const tc = await page.getTextContent();
+        // y 좌표가 같은 항목은 한 줄로, 다르면 줄바꿈
+        let lines = [], lastY = null, cur = [];
+        for (const it of tc.items) {
+            if (!('str' in it)) continue;
+            const y = Math.round(it.transform[5]);
+            if (lastY !== null && Math.abs(y - lastY) > 2) { lines.push(cur.join('')); cur = []; }
+            cur.push(it.str + (it.hasEOL ? '' : ''));
+            lastY = y;
+        }
+        if (cur.length) lines.push(cur.join(''));
+        pages.push(lines.join('\n'));
+    }
+    return pages.join('\n\n');
+}
+async function extractDocx(file) {
+    await loadLib('mammoth');
+    const r = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+    return r.value || '';
+}
+async function extractHwpx(file) {
+    await loadLib('jszip');
+    const zip = await JSZip.loadAsync(await file.arrayBuffer());
+    const names = Object.keys(zip.files)
+        .filter(n => /^Contents\/section\d+\.xml$/i.test(n))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    if (!names.length) throw new Error('hwpx 본문(section)을 찾지 못했습니다.');
+    const out = [];
+    for (const n of names) {
+        const xml = await zip.file(n).async('string');
+        const doc = new DOMParser().parseFromString(xml, 'application/xml');
+        const paras = doc.getElementsByTagNameNS('*', 'p');
+        for (const p of paras) {
+            const ts = p.getElementsByTagNameNS('*', 't');
+            let line = '';
+            for (const t of ts) line += t.textContent;
+            out.push(line);
+        }
+    }
+    return out.join('\n');
+}
+async function extractText(file) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (ext === 'pdf') return extractPdf(file);
+    if (ext === 'docx') return extractDocx(file);
+    if (ext === 'hwpx') return extractHwpx(file);
+    if (ext === 'hwp') throw new Error('구형 .hwp는 지원하지 않습니다. 한글에서 .hwpx 또는 PDF로 저장해 주세요.');
+    return file.text();
+}
+async function importFiles(files) {
+    if (!files || !files.length) return;
+    const ta = document.getElementById('profile');
+    const btn = document.getElementById('fileBtn');
+    btn.disabled = true;
+    let ok = 0;
+    for (const f of Array.from(files)) {
+        setFileStatus(`읽는 중: ${f.name} …`);
+        try {
+            const text = cleanText(await extractText(f));
+            if (!text) throw new Error('추출된 글자가 없습니다 (스캔 이미지 PDF일 수 있습니다).');
+            const block = `[파일: ${f.name}]\n${text}`;
+            ta.value = ta.value.trim() ? ta.value.replace(/\s+$/, '') + '\n\n' + block : block;
+            ok++;
+        } catch (e) {
+            setFileStatus(`${f.name}: ${e.message}`, true);
+            await new Promise(r => setTimeout(r, 1500));
+        }
+    }
+    btn.disabled = false;
+    document.getElementById('fileInput').value = '';
+    if (ok) {
+        setFileStatus(`✅ ${ok}개 파일의 내용을 아래 입력칸에 추가했습니다. 필요하면 고쳐 쓰세요.`);
+        ta.scrollTop = ta.scrollHeight;
+    }
 }
 
 // 프리미엄 / 사용량 / 서버
