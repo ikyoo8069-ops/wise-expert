@@ -54,6 +54,17 @@
         </div>
         <p id="fileStatus" class="hidden text-xs text-indigo-200 mb-2"></p>
 
+        <div class="grid grid-cols-3 gap-3 mb-3">
+            <div class="col-span-2">
+                <label class="block text-xs text-gray-400 mb-1">성명 <span class="text-gray-600">(파일에서 자동 인식, 고칠 수 있음)</span></label>
+                <input id="expertName" class="w-full px-3 py-2 bg-white/20 border border-white/30 rounded-lg text-white text-sm placeholder-gray-400" placeholder="예: 유인균">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">직함 <span class="text-gray-600">(호칭용)</span></label>
+                <input id="expertTitle" class="w-full px-3 py-2 bg-white/20 border border-white/30 rounded-lg text-white text-sm placeholder-gray-400" placeholder="예: 부회장, 교수, 박사">
+            </div>
+        </div>
+
         <textarea id="profile" rows="10" class="w-full px-4 py-3 bg-white/20 border border-white/30 rounded-lg text-white text-sm placeholder-gray-400" placeholder="□ 성명&#10;□ 학력&#10;□ 경력&#10;□ 논문·특허·수행과제&#10;□ 상훈"></textarea>
 
         <div class="grid md:grid-cols-2 gap-3 mt-4">
@@ -70,6 +81,23 @@
         <div class="mt-4">
             <label class="block text-sm text-gray-400 mb-1">함께 할 기관</label>
             <input id="society" value="한국자산관리학회" class="w-full px-3 py-2 bg-white/20 border border-white/30 rounded-lg text-white text-sm">
+        </div>
+
+        <!-- 임원 네트워크 -->
+        <div class="mt-4 bg-white/5 border border-white/15 rounded-lg p-4">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                    <p class="text-sm font-bold text-white">👥 함께 할 임원 네트워크 <span class="text-gray-500 font-normal text-xs">(선택)</span></p>
+                    <p class="text-gray-400 text-xs mt-0.5">임원 이력서 파일을 넣어 두면 후보 사업마다 "함께 할 임원"을 찾습니다. 주소·전화·생년월일은 자동으로 걷어냅니다.</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="document.getElementById('networkInput').click()" id="networkBtn" class="px-3 py-2 bg-emerald-500/30 border border-emerald-400/60 rounded-lg text-emerald-100 text-xs font-bold hover:bg-emerald-500/50 transition">＋ 임원 이력서 넣기</button>
+                    <button onclick="clearNetwork()" id="networkClearBtn" class="hidden px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-gray-300 text-xs hover:border-red-400">비우기</button>
+                    <input type="file" id="networkInput" class="hidden" multiple accept=".pdf,.docx,.hwpx,.txt,.md" onchange="importNetwork(this.files)">
+                </div>
+            </div>
+            <p id="networkStatus" class="hidden text-xs text-emerald-200 mt-2"></p>
+            <div id="networkList" class="flex flex-wrap gap-1.5 mt-2"></div>
         </div>
 
         <button onclick="runTrace()" class="w-full mt-5 py-4 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-xl font-bold text-lg hover:opacity-90 transition">
@@ -264,6 +292,7 @@ async function importFiles(files) {
     if (!files || !files.length) return;
     const ta = document.getElementById('profile');
     const btn = document.getElementById('fileBtn');
+    const firstName = files[0] ? files[0].name : '';
     btn.disabled = true;
     let ok = 0;
     for (const f of Array.from(files)) {
@@ -284,7 +313,165 @@ async function importFiles(files) {
     if (ok) {
         setFileStatus(`✅ ${ok}개 파일의 내용을 아래 입력칸에 추가했습니다. 필요하면 고쳐 쓰세요.`);
         ta.scrollTop = ta.scrollHeight;
+        const nameEl = document.getElementById('expertName');
+        if (!nameEl.value.trim()) nameEl.value = parseName(ta.value);
+        const titleEl = document.getElementById('expertTitle');
+        if (!titleEl.value.trim() && firstName) titleEl.value = parseTitleFromFilename(firstName);
     }
+}
+
+// ============================================
+// 임원 네트워크 — 이력서 여러 개 → 이름·직위·전문성 (연락처 제거)
+// ============================================
+let network = [];
+const TITLE_RE = /(이사장|부회장|회장|감사|이사|고문|소장|국장|교수|박사|변호사|회계사)/;
+
+function parseName(text) {
+    const m = text.match(/성\s*명\s*[:：]\s*([^\n\r(]+)/);
+    return m ? m[1].replace(/\s+/g, '').slice(0, 10) : '';
+}
+function parseTitleFromFilename(fname) {
+    const base = fname.replace(/\.[^.]+$/, '');
+    const parts = base.split(/[_\-\s]+/);
+    for (const p of parts) { const m = p.match(TITLE_RE); if (m) return m[1]; }
+    return '';
+}
+function honorific(name, title) {
+    name = (name || '').trim(); title = (title || '').trim();
+    if (!name) return '';
+    return title ? `${name} ${title}님` : `${name} 님`;
+}
+function expertHonorific() {
+    return honorific(document.getElementById('expertName').value, document.getElementById('expertTitle').value);
+}
+// 개인정보(주소·전화·생년월일·출생지) 제거
+function stripPrivate(text) {
+    const out = [];
+    let skipAddr = false;
+    for (const raw of text.split('\n')) {
+        const line = raw.trim();
+        if (/^[□■]?\s*주\s*소/.test(line)) { skipAddr = true; continue; }
+        if (skipAddr) {
+            if (/^[□■]/.test(line) || /^(학|경|상)\s*(력|훈)/.test(line)) skipAddr = false;
+            else continue;
+        }
+        if (/생\s*년\s*월\s*일|출\s*생\s*지|전화|CP\s*[(（]|팩스|FAX|연락처|휴대폰|\d{2,3}[-\s]\d{3,4}[-\s]\d{4}/i.test(line)) continue;
+        if (/^-\s*\d+\s*-$/.test(line) || /^<\s*별\s*지/.test(line)) continue;
+        out.push(raw);
+    }
+    return cleanText(out.join('\n'));
+}
+function summarize(text) {
+    // 학력·경력·상훈 중 핵심 줄 몇 개 (보고서용 한 줄 요약)
+    const lines = text.split('\n').map(s => s.replace(/^[\sㅇ○o•\-]+/, '').trim()).filter(Boolean);
+    const career = lines.filter(l => /\(현\)|현\)|\(전\)|교수|대표|위원|소장|원장|이사|회장|연구/.test(l));
+    return (career.length ? career : lines).slice(0, 4).join(' / ');
+}
+function setNetworkStatus(msg, isErr) {
+    const el = document.getElementById('networkStatus');
+    if (!msg) { el.classList.add('hidden'); return; }
+    el.textContent = msg;
+    el.className = 'text-xs mt-2 ' + (isErr ? 'text-red-300' : 'text-emerald-200');
+}
+function renderNetwork() {
+    const box = document.getElementById('networkList');
+    box.innerHTML = network.map((p, i) => `
+        <span class="inline-flex items-center gap-1 px-2 py-1 bg-emerald-500/20 border border-emerald-400/40 rounded-full text-emerald-100 text-xs">
+            ${esc(honorific(p.name, p.title))}
+            <button onclick="removeNetwork(${i})" class="text-emerald-300 hover:text-red-300" title="제외">✕</button>
+        </span>`).join('');
+    document.getElementById('networkClearBtn').classList.toggle('hidden', !network.length);
+}
+function removeNetwork(i) { network.splice(i, 1); renderNetwork(); setNetworkStatus(network.length ? `임원 ${network.length}명` : ''); }
+function clearNetwork() { network = []; renderNetwork(); setNetworkStatus(''); }
+async function importNetwork(files) {
+    if (!files || !files.length) return;
+    const btn = document.getElementById('networkBtn');
+    btn.disabled = true;
+    let ok = 0;
+    for (const f of Array.from(files)) {
+        setNetworkStatus(`읽는 중: ${f.name} …`);
+        try {
+            const raw = cleanText(await extractText(f));
+            if (!raw) throw new Error('추출된 글자가 없습니다.');
+            const name = parseName(raw) || f.name.replace(/\.[^.]+$/, '');
+            const title = parseTitleFromFilename(f.name);
+            const text = stripPrivate(raw);
+            const idx = network.findIndex(p => p.name === name);
+            const entry = { name, title, text, summary: summarize(text) };
+            if (idx >= 0) network[idx] = entry; else network.push(entry);
+            ok++;
+        } catch (e) {
+            setNetworkStatus(`${f.name}: ${e.message}`, true);
+            await new Promise(r => setTimeout(r, 1500));
+        }
+    }
+    btn.disabled = false;
+    document.getElementById('networkInput').value = '';
+    renderNetwork();
+    if (ok) setNetworkStatus(`✅ 임원 ${network.length}명의 이력을 네트워크로 넣었습니다 (연락처 제거됨).`);
+}
+// 분석 대상 본인은 네트워크에서 제외
+function networkExcludingSelf() {
+    const me = document.getElementById('expertName').value.replace(/\s+/g, '');
+    return network.filter(p => p.name.replace(/\s+/g, '') !== me);
+}
+// 서버에 함께 보낼 네트워크 텍스트
+function networkPrompt() {
+    const list = networkExcludingSelf();
+    if (!list.length) return '';
+    const society = document.getElementById('society').value.trim() || '한국자산관리학회';
+    return `\n\n[참고: ${society} 임원 네트워크 — 분석 대상이 아니라 함께 할 수 있는 사람들입니다. 각 사업 후보의 need_expertise에는 전문분야와 함께, 이 네트워크 안에서 그 전문성을 채울 수 있는 임원을 "이름 직위 — 이유" 형식으로 넣어 주세요.]\n` +
+        list.map(p => `■ ${p.name} ${p.title || ''}\n${p.text.split('\n').slice(0, 25).join('\n')}`).join('\n\n');
+}
+// 앱 안에서의 매칭 — 필요한 전문분야 ↔ 임원 이력 (서버 응답과 별개로 항상 계산)
+const FIELD_SYNONYMS = {
+    '회계': ['회계', '세무', '국세', '납세', 'CPA', '공인회계사', '경영학'],
+    '세무': ['세무', '국세', '납세', '회계', 'CPA'],
+    '법률': ['법학', '변호사', '법무', '법제', '법률'],
+    '법': ['법학', '변호사', '법무', '법제'],
+    '부동산': ['부동산', '공유재산', '자산관리', '개발'],
+    '관광': ['관광', 'MICE', '호텔', '컨벤션', '외식'],
+    'MICE': ['MICE', '관광', '컨벤션'],
+    '교육': ['교육', '교수', '강사', '교육공학', '기업교육'],
+    '경영': ['경영', '전략', '기술경영', '산업공학'],
+    '기술': ['공학', '기술', '연구원', '산업공학', '토목'],
+    '건설': ['토목', '건설', '도로', '인프라', '공학'],
+    'IT': ['IoT', 'ICT', '정보', 'IT', '시스템'],
+    '금융': ['금융', '회계', '재무', '기술금융'],
+    '공공': ['공무원', '위원', '지방자치', '국토', '심의'],
+    '행정': ['행정', '경찰', '군', '위원'],
+    '해양': ['해양', '수산', '항만', '조선'],
+    '국제': ['국제', '무역', '통상', 'University', '한국대학'],
+};
+function matchOfficers(needs) {
+    const list = networkExcludingSelf();
+    if (!list.length || !needs || !needs.length) return [];
+    const result = [];
+    for (const need of needs) {
+        const n = String(need);
+        let keys = [];
+        for (const k in FIELD_SYNONYMS) if (n.includes(k)) keys = keys.concat(FIELD_SYNONYMS[k]);
+        n.split(/[\s·,/()·]+/).filter(w => w.length >= 2).forEach(w => keys.push(w));
+        keys = [...new Set(keys)];
+        const scored = list.map(p => {
+            let s = 0;
+            for (const k of keys) { const re = new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'); const m = p.text.match(re); if (m) s += m.length; }
+            return { p, s };
+        }).filter(x => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 3);
+        result.push({ need: n, officers: scored.map(x => x.p) });
+    }
+    return result;
+}
+function matchHtml(needs, dark) {
+    const m = matchOfficers(needs).filter(x => x.officers.length);
+    if (!m.length) return '';
+    return m.map(x => `
+        <div class="flex flex-wrap items-center gap-1 text-xs">
+            <span class="${dark ? 'text-emerald-300' : 'text-emerald-700'} font-bold">${esc(x.need)}</span>
+            <span class="text-gray-400">→</span>
+            ${x.officers.map(p => `<span class="px-2 py-0.5 ${dark ? 'bg-emerald-500/20 text-emerald-100' : 'bg-emerald-100 text-emerald-800'} rounded">${esc(honorific(p.name, p.title))}</span>`).join('')}
+        </div>`).join('');
 }
 
 // 프리미엄 / 사용량 / 서버
@@ -345,7 +532,10 @@ async function runTrace() {
         const r = await fetch(`${BACKEND_URL}/api/expert-trace`, {
             method:'POST', headers: headers(),
             body: JSON.stringify({
-                profile: profile,
+                profile: profile + networkPrompt(),
+                expert_name: document.getElementById('expertName').value.trim(),
+                expert_title: document.getElementById('expertTitle').value.trim(),
+                network: networkExcludingSelf().map(p => ({ name: p.name, title: p.title, summary: p.summary })),
                 interest: document.getElementById('interest').value.trim(),
                 regret: document.getElementById('regret').value.trim(),
                 society: document.getElementById('society').value.trim() || '한국자산관리학회'
@@ -393,7 +583,7 @@ function renderTrace() {
 
     document.getElementById('traceSection').innerHTML = `
     <div class="bg-white rounded-xl shadow-2xl p-6">
-        <h2 class="text-xl font-bold text-gray-800 mb-4">🧭 대체의 궤적</h2>
+        <h2 class="text-xl font-bold text-gray-800 mb-4">🧭 ${esc(expertHonorific() ? expertHonorific() + '의 ' : '')}대체의 궤적</h2>
 
         <div class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded-r-lg mb-4">
             <p class="text-gray-800">${esc(t.trace || '')}</p>
@@ -479,7 +669,8 @@ function renderCandidates() {
                 <p class="text-gray-700 text-sm mt-1">${esc(c.why_together)}</p>
             </div>` : ''}
 
-            ${need ? `<div class="mb-4"><p class="text-xs font-bold text-slate-500 mb-1">필요한 다른 전문분야</p><div class="flex flex-wrap gap-1">${need}</div></div>` : ''}
+            ${need ? `<div class="mb-3"><p class="text-xs font-bold text-slate-500 mb-1">필요한 다른 전문분야</p><div class="flex flex-wrap gap-1">${need}</div></div>` : ''}
+            ${(() => { const h = matchHtml(c.need_expertise, false); return h ? `<div class="mb-4 bg-emerald-50 border border-emerald-200 rounded-lg p-3"><p class="text-xs font-bold text-emerald-700 mb-1">👥 학회 안에서 함께 할 임원</p><div class="space-y-1">${h}</div></div>` : ''; })()}
 
             <button onclick="pickCandidate(${i})" class="w-full py-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg font-bold text-sm hover:opacity-90 transition">
                 📄 이 사업으로 기획서 초안 만들기
@@ -490,7 +681,7 @@ function renderCandidates() {
     const top = topCandidateIndex();
     const topBtn = top >= 0 ? `
     <button onclick="autoDraftAndSave()" class="w-full mb-4 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-bold text-sm hover:opacity-90 transition">
-        ⭐ 실용성 최고 후보(${esc(candidates[top].title || '')}, ${candidates[top].utility || 0}점)로 초안 만들고 한 파일로 저장
+        ⭐ ${esc(expertHonorific() ? expertHonorific() + ' — ' : '')}실용성 최고 후보(${esc(candidates[top].title || '')}, ${candidates[top].utility || 0}점)로 초안 만들고 결과보고서 한 파일로 저장
     </button>` : '';
 
     document.getElementById('candSection').innerHTML = `
@@ -516,7 +707,11 @@ async function pickCandidate(i) {
         const r = await fetch(`${BACKEND_URL}/api/expert-draft`, {
             method:'POST', headers: headers(),
             body: JSON.stringify({
-                profile: document.getElementById('profile').value.trim(),
+                profile: document.getElementById('profile').value.trim() + networkPrompt(),
+                expert_name: document.getElementById('expertName').value.trim(),
+                expert_title: document.getElementById('expertTitle').value.trim(),
+                network: networkExcludingSelf().map(p => ({ name: p.name, title: p.title, summary: p.summary })),
+                partners: matchOfficers(chosen.need_expertise || []).map(x => ({ need: x.need, officers: x.officers.map(p => honorific(p.name, p.title)) })),
                 trace: (traceData && traceData.trace) || '',
                 topic: chosen.title || '',
                 edge: chosen.edge || '',
@@ -576,7 +771,7 @@ function renderDraft() {
             <h2 class="text-xl font-bold text-gray-800">📄 사업 기획서 초안</h2>
             <div class="shrink-0 flex gap-2">
                 <button onclick="copyDraft()" class="px-3 py-1.5 bg-slate-700 text-white rounded-lg text-xs hover:bg-slate-800 transition">📋 복사</button>
-                <button onclick="saveReport()" class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs hover:bg-indigo-700 transition">📥 한 파일로 저장</button>
+                <button onclick="saveReport()" class="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs hover:bg-indigo-700 transition">📥 결과보고서 한 파일로 저장</button>
             </div>
         </div>
         <p class="text-gray-500 text-xs mb-5">완성본이 아닙니다. 고칠 데가 보이도록 쓴 초안입니다.</p>
@@ -722,7 +917,10 @@ function extractName() {
 function buildReportHtml() {
     const t = traceData || {}, D = draftData || {}, c = chosen || {};
     const society = document.getElementById('society').value.trim() || '한국자산관리학회';
-    const name = extractName();
+    const name = document.getElementById('expertName').value.trim() || extractName();
+    const who = honorific(name, document.getElementById('expertTitle').value);
+    const net = networkExcludingSelf();
+    const partners = matchOfficers(c.need_expertise || []).filter(x => x.officers.length);
     const today = new Date().toISOString().slice(0, 10);
     const ul = (arr) => (arr && arr.length) ? `<ul>${arr.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
     const sorted = candidates.map((x, i) => ({ ...x, _i: i })).sort((a, b) => (Number(b.utility) || 0) - (Number(a.utility) || 0));
@@ -735,7 +933,7 @@ function buildReportHtml() {
 
     return `<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8">
-<title>${esc(name ? name + ' — ' : '')}N2B 전문가 분석 및 사업 기획서 초안</title>
+<title>${esc(who ? who + ' — ' : '')}N2B 전문가 분석 및 사업 기획서 초안</title>
 <style>
  body{font-family:"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif;max-width:800px;margin:40px auto;padding:0 24px;color:#222;line-height:1.6}
  h1{font-size:22px;border-bottom:3px solid #1d3557;padding-bottom:8px;margin-bottom:4px}
@@ -759,9 +957,9 @@ function buildReportHtml() {
  @media print{body{margin:0;max-width:none} h2{page-break-after:avoid}}
 </style></head><body>
 <h1>🧭 N2B 전문가 분석 및 사업 기획서 초안</h1>
-<div class="meta">${name ? '전문가: <b>' + esc(name) + '</b> · ' : ''}함께 할 기관: ${esc(society)} · 작성일: ${today} · 슬기로운 전문가(N2B)</div>
+<div class="meta">${who ? '전문가: <b>' + esc(who) + '</b> · ' : ''}함께 할 기관: ${esc(society)} · 작성일: ${today} · 슬기로운 전문가(N2B)</div>
 
-<h2>1. 대체의 궤적</h2>
+<h2>1. ${esc(who ? who + '의 ' : '')}대체의 궤적</h2>
 <div class="box">${esc(t.trace || '')}</div>
 ${t.trace_evidence && t.trace_evidence.length ? `<h3>궤적의 근거</h3>${ul(t.trace_evidence, '—')}` : ''}
 ${t.core_strength ? `<h3>다른 사람이 갖기 어려운 자리</h3><p>${esc(t.core_strength)}</p>` : ''}
@@ -796,6 +994,18 @@ ${D.funding_route && D.funding_route.length ? `<h3>8. 연계 가능 사업·발�
 ${D.to_confirm && D.to_confirm.length ? `<div class="box orange"><b>확인이 필요합니다 — 심층 검토 요청</b><br><span class="sub">아래는 이력만으로 알 수 없어 추측한 대목입니다. 본인 확인을 부탁드립니다.</span>${ul(D.to_confirm, '?')}</div>` : ''}
 ${D.next_step ? `<h3>바로 할 수 있는 다음 행동</h3><p>${esc(D.next_step)}</p>` : ''}
 
+${net.length ? `
+<h2>4. 함께 할 임원 네트워크</h2>
+${partners.length ? `<h3>이 사업에 필요한 전문성과 학회 안의 적임자</h3>
+<table><tr><th style="width:30%">필요한 전문분야</th><th>함께 할 임원</th></tr>
+${partners.map(x => `<tr><td>${esc(x.need)}</td><td>${x.officers.map(p => `<b>${esc(honorific(p.name, p.title))}</b> <span class="sub">— ${esc(p.summary)}</span>`).join('<br>')}</td></tr>`).join('')}
+</table>` : `<p class="sub">필요한 전문분야와 직접 겹치는 임원을 찾지 못했습니다. 아래 명단에서 직접 고르실 수 있습니다.</p>`}
+<h3>${esc(society)} 임원 명단 (${net.length}명)</h3>
+<table><tr><th style="width:26%">임원</th><th>핵심 이력</th></tr>
+${net.map(p => `<tr><td><b>${esc(honorific(p.name, p.title))}</b></td><td class="sub">${esc(p.summary)}</td></tr>`).join('')}
+</table>
+<p class="sub">임원 이력서에서 학력·경력·상훈만 사용했으며 주소·연락처·생년월일은 제외했습니다.</p>` : ''}
+
 <div class="foot">© N2B Framework | Brian Yoo — 슬기로운 전문가에서 생성. 브라우저에서 인쇄(Ctrl+P) → PDF로 저장할 수 있습니다.</div>
 </body></html>`;
 }
@@ -803,8 +1013,9 @@ function saveReport() {
     if (!traceData) { alert('먼저 궤적을 읽어 주세요.'); return; }
     if (!draftData) { alert('기획서 초안이 아직 없습니다. 후보를 골라 초안을 먼저 만들어 주세요.'); return; }
     const html = buildReportHtml();
-    const name = extractName();
-    const fname = `${name ? name + '_' : ''}N2B_사업기획서초안_${new Date().toISOString().slice(0, 10)}.html`;
+    const name = (document.getElementById('expertName').value.trim() || extractName()).replace(/[\\/:*?"<>|\s]/g, '');
+    const title = document.getElementById('expertTitle').value.trim().replace(/[\\/:*?"<>|\s]/g, '');
+    const fname = `${name ? name + (title ? title : '') + '님_' : ''}N2B_사업기획서초안_${new Date().toISOString().slice(0, 10)}.html`;
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
