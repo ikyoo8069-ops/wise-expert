@@ -344,6 +344,28 @@ function honorific(name, title) {
 function expertHonorific() {
     return honorific(document.getElementById('expertName').value, document.getElementById('expertTitle').value);
 }
+// 서버에 보내는 호칭 지시
+function honorificPrompt() {
+    const h = expertHonorific();
+    if (!h) return '';
+    return `[분석 대상: ${h}. 모든 문장에서 이 분을 성명만으로 부르지 말고 반드시 "${h}"으로 존칭하여 지칭해 주세요. 예: "${h}은 …", "${h}의 궤적".]\n\n`;
+}
+// 받은 문장에서 이름만 있는 곳에 호칭을 붙이고 조사를 맞춤 (님 → 받침 있음)
+const PARTICLE_AFTER_NIM = { '는':'은', '가':'이', '를':'을', '와':'과', '이는':'은', '이가':'이' };
+function applyHonorificText(text) {
+    const name = document.getElementById('expertName').value.replace(/\s+/g, '');
+    const h = expertHonorific();
+    if (!name || !h || typeof text !== 'string') return text;
+    const spacedName = name.split('').join('\\s?');
+    const re = new RegExp(`(^|[^가-힣A-Za-z])${spacedName}(?!\\s*(님|씨|${(document.getElementById('expertTitle').value.trim() || '§')}|회장|부회장|이사장|이사|감사|교수|박사|대표|위원|원장|소장|국장|선생))(는|은|가|이|를|을|와|과|의|도|께서|에게|께|만|부터|까지|으로|로)?(?=[^가-힣]|$)`, 'g');
+    return text.replace(re, (m, pre, _t, particle) => pre + h + (particle ? (PARTICLE_AFTER_NIM[particle] || particle) : ''));
+}
+function applyHonorificDeep(obj) {
+    if (typeof obj === 'string') return applyHonorificText(obj);
+    if (Array.isArray(obj)) return obj.map(applyHonorificDeep);
+    if (obj && typeof obj === 'object') { const o = {}; for (const k in obj) o[k] = applyHonorificDeep(obj[k]); return o; }
+    return obj;
+}
 // 개인정보(주소·전화·생년월일·출생지) 제거
 function stripPrivate(text) {
     const out = [];
@@ -532,7 +554,7 @@ async function runTrace() {
         const r = await fetch(`${BACKEND_URL}/api/expert-trace`, {
             method:'POST', headers: headers(),
             body: JSON.stringify({
-                profile: profile + networkPrompt(),
+                profile: honorificPrompt() + profile + networkPrompt(),
                 expert_name: document.getElementById('expertName').value.trim(),
                 expert_title: document.getElementById('expertTitle').value.trim(),
                 network: networkExcludingSelf().map(p => ({ name: p.name, title: p.title, summary: p.summary })),
@@ -560,7 +582,7 @@ async function runTrace() {
             return;
         }
 
-        traceData = d.result;
+        traceData = applyHonorificDeep(d.result);
         candidates = traceData.candidates || [];
         renderTrace();
         renderCandidates();
@@ -707,7 +729,7 @@ async function pickCandidate(i) {
         const r = await fetch(`${BACKEND_URL}/api/expert-draft`, {
             method:'POST', headers: headers(),
             body: JSON.stringify({
-                profile: document.getElementById('profile').value.trim() + networkPrompt(),
+                profile: honorificPrompt() + document.getElementById('profile').value.trim() + networkPrompt(),
                 expert_name: document.getElementById('expertName').value.trim(),
                 expert_title: document.getElementById('expertTitle').value.trim(),
                 network: networkExcludingSelf().map(p => ({ name: p.name, title: p.title, summary: p.summary })),
@@ -741,7 +763,7 @@ async function pickCandidate(i) {
             return;
         }
 
-        draftData = d.result;
+        draftData = applyHonorificDeep(d.result);
         renderDraft();
 
     } catch (err) {
